@@ -1,0 +1,14 @@
+# Ensure text files use LF in the repo, but CRLF on Windows
+* text=auto
+
+# Force specific files to always use LF
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.ejs text eol=lf
+
+# Binary files should not have their line endings changed
+*.svg binary
+*.png binary
+*.jpg binary
+*.gif binary
