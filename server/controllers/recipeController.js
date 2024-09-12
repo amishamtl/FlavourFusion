@@ -77,7 +77,6 @@ exports.exploreCategories = async (req, res) => {
   }
 };
 
-
 /**
  * GET /categories/:id
  * Categories By Id
@@ -138,6 +137,10 @@ exports.exploreRecipe = async (req, res) => {
   }
 };
 
+/**
+ * POST /recipe/:id/favorite
+ * Save Recipe to Favorites
+ */
 exports.contactUsgetFavoriteRecipes = async (req, res) => {
   try {
     const userId = req.user.id;  // Extract user ID from the token
@@ -152,34 +155,6 @@ exports.contactUsgetFavoriteRecipes = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-/**
- * POST /recipe/:id/favorite
- * Save Recipe to Favorites
- */
-
-exports.saveRecipeToFavorites = async (req, res) => {
-  try {
-    // console.log(req.params.id);
-    
-    const recipeId = req.params.id;
-    const userId = req.user.id;  // Assuming you have user ID in req.user (after authentication)
-const recipe = require("../models/Recipe")
-    // Logic to add recipe to favorites (you may need to use a database query here)
-    // Example:
-    const user = await recipe.findById(recipeId);
-    // console.log("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",user);
-    
-    userModel.favorites.push(user._id);
-    await userModel.save();
-
-    res.status(200).json({ message: 'Recipe added to favorites!' });
-  } catch (error) {
-    console.error('Error adding recipe to favorites:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
-};
-
-// Add this new route in your `recipeController.js`:
 
 /**
  * POST /recipe/:id/rate
@@ -190,35 +165,49 @@ exports.rateRecipe = async (req, res) => {
     let recipeId = req.params.id;
     const { rating } = req.body;
     const userId = req.user; // Assuming you have the user logged in
-    console.log(req.body);
-    console.log("Rating",rating);
-    let recipe = await Recipe.findById(recipeId);
     
-    // Initialize ratings array if undefined
+    // Fetch the recipe by its ID
+    let recipe = await Recipe.findById(recipeId).populate('ratings.userId', 'name'); // Populate the user data
+
+    // Initialize ratings array if it's undefined
     if (!recipe.ratings) {
       recipe.ratings = [];
     }
 
     // Check if the user has already rated the recipe
-    const existingRating = recipe.ratings.find(r => r.userId === userId);
+    const existingRating = recipe.ratings.find(r => r.userId.equals(userId));
 
     if (existingRating) {
-      // Update the existing rating
+      // If the user has already rated, update the rating
       existingRating.rating = rating;
     } else {
-      // Add new rating
+      // Add a new rating if the user hasn't rated yet
       recipe.ratings.push({ userId, rating });
     }
 
+    // Save the updated recipe with the new or updated rating
     await recipe.save();
-    res.redirect(`/recipe/${recipeId}`);
+
+    // Calculate the average rating for the recipe
+    const averageRating = calculateAverageRating(recipe.ratings);
+
+    // Redirect to the recipe page and pass the updated ratings and average rating
+    res.render('users/recipe', {
+      title: 'FlavourFusion - Recipe',
+      recipe,
+      averageRating
+    });
   } catch (error) {
-    res.status(500).send({ message: error.message || "Error Occurred" });
+    res.status(500).send({ message: error.message || 'Error Occurred' });
   }
-  
 };
 
-
+function calculateAverageRating(ratings) {
+  if (!ratings || ratings.length === 0) return 'No ratings yet';
+  const totalRatings = ratings.length;
+  const sumRatings = ratings.reduce((sum, r) => sum + r.rating, 0);
+  return (sumRatings / totalRatings).toFixed(1);
+}
 
 /**
  * POST /search
@@ -285,51 +274,6 @@ exports.submitRecipe = async (req, res) => {
   });
 };
 
-/**
- * POST /submit-recipe
- * Submit Recipe
- */
-// exports.submitRecipeOnPost = async (req, res) => {
-//   try {
-//     let imageUploadFile;
-//     let uploadPath;
-//     let newImageName;
-
-//     if (!req.files || Object.keys(req.files).length === 0) {
-//       console.log("No Files where uploaded.");
-//     } else {
-//       imageUploadFile = req.files.image;
-//       newImageName = Date.now() + imageUploadFile.name;
-
-//       uploadPath =
-//         require("path").resolve("./") + "/public/uploads/" + newImageName;
-
-//       imageUploadFile.mv(uploadPath, function (err) {
-//         if (err) return res.satus(500).send(err);
-//       });
-//     }
-
-//     const newRecipe = new Recipe({
-//       name: req.body.name,
-//       description: req.body.description,
-//       email: req.body.email,
-//       ingredients: req.body.ingredients,
-//       category: req.body.category,
-//       image: newImageName,
-//     });
-
-//     await newRecipe.save();
-
-//     req.flash("infoSubmit", "Recipe has been added.");
-//     res.redirect("/submit-recipe");
-//   } catch (error) {
-//     // res.json(error);
-//     req.flash("infoErrors", error);
-//     res.redirect("/submit-recipe");
-//   }
-// };
-
-
 exports.submitRecipeOnPost = async (req, res) => {
   try {
     let imageUploadFile;
@@ -379,8 +323,223 @@ exports.submitRecipeOnPost = async (req, res) => {
   }
 };
 
+// Assuming this is your login route handler
+
+// Render login page with captcha
+exports.renderLoginPage = (req, res) => {
+  const captcha = otpGenerator.generate(6); // Generate a 6-digit CAPTCHA
+  req.session.captcha = captcha; // Store CAPTCHA in session for validation
+  res.render('users/login', { captcha }); // Render login page with CAPTCHA
+};
+
+// Render login page with captcha
+exports.renderLoginPage = (req, res) => {
+  const captcha = otpGenerator.generate(6);
+
+  // Store the CAPTCHA in the session for validation later
+  // console.log("captcha generated------------------->",captcha);
+ 
+  req.session.captcha = captcha;
+
+  // console.log(req.session);
+
+  
+
+  res.render('users/login', { captcha });
+};
+
+// User Login
+// User Login with Validation
+exports.userLogin = async (req, res) => {
+  // Check for validation errors
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    const errorMessages = errors.array().map(error => error.msg);
+    req.flash('error', errorMessages.join(', '));
+    return res.redirect('/login');
+  }
+
+  try {
+    const { email, password, captchaInput } = req.body;
+
+    // Validate Captcha
+    if (captchaInput !== req.session.captcha) {
+      req.flash('error', 'Invalid Captcha!');
+      return res.redirect('/login');
+    }
+
+    // Find User by email
+    const user = await userModel.findOne({ email });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      req.flash('error', 'Invalid email or password');
+      return res.redirect('/login');
+    }
+
+    // Clear Captcha from session after successful login
+    req.session.captcha = null;
+
+    // Store user email in session
+    req.session.userEmail = user.email;
+
+    // Generate JWT
+    const token = jwt.sign({ userId: user._id }, "AmishaAmisha", { expiresIn: '1h' });
+    req.session.token = token;
+    req.session.userRole = user.role;
+
+    // Redirect based on user role
+    if (user.role === "admin") {
+      return res.redirect('/admin');
+    }
+
+    res.redirect(`/?name=${user.name}`);
+  } catch (error) {
+    console.error("Error during login:", error);
+    req.flash('error', 'An error occurred during login');
+    res.redirect('/login');
+  }
+};
+
+// OTP Generation
+exports.generateOtp = async (req, res) => {
+  const { phoneNumber } = req.body;
+  // console.log(phoneNumber);
+  
+  try {
+    // Check if the user exists
+    const user = await userModel.findOne({ phoneNumber });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+      // res.render('otp_verify');
+    }
+
+    // Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000);
+
+    // code given by twilio
+    // client.verify.v2.services("VA2c0ea26dda32eb184f4be3de31cc70b7")
+    //   .verificationChecks
+    //   .create({to: '+918181000731', code: '[Code]'})
+    //   .then(verification_check => console.log(verification_check.status));
+
+    console.log(otp);
+    // code given by twilio
+    // client.verify.v2.services("VA2c0ea26dda32eb184f4be3de31cc70b7")
+    //   .verifications
+    //   .create({to: '+91'+phoneNumber, channel: 'sms'})
+    //   .then(verification => console.log(verification.status));
 
 
+    // Send OTP via Twilio SMS
+    client.messages.create({
+      body: `Amisha jaldi se otp bhej
+        ${otp}`,
+        to: '+91'+phoneNumber,
+        from:'+19166940794',
+    });
+
+    // Store OTP in session
+    req.session.otp = otp
+    
+    req.session.phoneNumber = phoneNumber
+    
+    // res.status(200).json({ message: 'OTP sent to your phone number.' });
+    res.render('users/otp_verify');
+  } catch (error) {
+    res.status(500).json({ message: 'Something went wrong' });
+    // res.render('otp_verify');
+  }
+}
+// verify otp
+exports.verifyOtp = async (req, res) => {
+  const {  otp, newPassword } = req.body;
+
+  const phoneNumber = req.session.phoneNumber
+  try {
+    const user = await userModel.findOne({ phoneNumber });
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    // Check if the OTP matches
+    if (req.session.otp != req.body.otp) {
+      return res.status(400).json({ message: 'Invalid OTP' });
+    }
+
+    // Set new password
+    const newHashPassword = await bcrypt.hash(newPassword, 12)
+    user.password = newHashPassword;
+    await user.save();
+    // Delete OTP and phoneNo from session
+    req.session.phoneNumber = null;
+    req.session.otp = null;
+    // res.status(200).json({ message: 'Password reset successful' });
+    res.redirect('/login');
+  } catch (error) {
+    res.status(500).json({ message: 'Something went wrong' });
+  }
+}
+
+exports.userSignup = async (req, res) => {
+  try {
+    const { name, email,phoneNumber, gender, age, password } = req.body;
+    // console.log(name, email, gender, age, password );
+    const hashPassword = await bcrypt.hash(password, 12);
+    // console.log(hashPassword);
+    const user = new userModel({
+      name,
+      email,
+      phoneNumber,
+      gender,
+      age,
+      password: hashPassword,
+    });
+    // console.log(user);
+
+    await user.save();
+
+    res.redirect("/login");
+  } catch (error) {
+    res.status(400).json({
+      msg: "error on signup the user",
+      error: error,
+    });
+  }
+};
+
+exports.contactUs = async (req, res) => {
+  res.redirect("/");
+};
+
+exports.useLogout = async (req, res) => {
+  req.session.destroy();
+  console.log("logout successfully");
+  
+  res.redirect("/about");
+
+  };
+
+  exports.saveRecipeToFavorites = async (req, res) => {
+    try {
+      // console.log(req.params.id);
+      
+      const recipeId = req.params.id;
+      const userId = req.user.id;  // Assuming you have user ID in req.user (after authentication)
+  const recipe = require("../models/Recipe")
+      // Logic to add recipe to favorites (you may need to use a database query here)
+      // Example:
+      const user = await recipe.findById(recipeId);
+      // console.log("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",user);
+      
+      userModel.favorites.push(user._id);
+      await userModel.save();
+  
+      res.status(200).json({ message: 'Recipe added to favorites!' });
+    } catch (error) {
+      console.error('Error adding recipe to favorites:', error);
+      res.status(500).json({ error: 'Server error' });
+    }
+  };
+  
 // Delete Recipe
 // async function deleteRecipe(){
 //   try {
@@ -477,206 +636,47 @@ exports.submitRecipeOnPost = async (req, res) => {
 
 // insertDymmyRecipeData();
 
-// Assuming this is your login route handler
+/**
+ * POST /submit-recipe
+ * Submit Recipe
+ */
+// exports.submitRecipeOnPost = async (req, res) => {
+//   try {
+//     let imageUploadFile;
+//     let uploadPath;
+//     let newImageName;
 
-// Render login page with captcha
-exports.renderLoginPage = (req, res) => {
-  const captcha = otpGenerator.generate(6); // Generate a 6-digit CAPTCHA
-  req.session.captcha = captcha; // Store CAPTCHA in session for validation
-  res.render('users/login', { captcha }); // Render login page with CAPTCHA
-};
+//     if (!req.files || Object.keys(req.files).length === 0) {
+//       console.log("No Files where uploaded.");
+//     } else {
+//       imageUploadFile = req.files.image;
+//       newImageName = Date.now() + imageUploadFile.name;
 
-// Render login page with captcha
-exports.renderLoginPage = (req, res) => {
-  const captcha = otpGenerator.generate(6);
+//       uploadPath =
+//         require("path").resolve("./") + "/public/uploads/" + newImageName;
 
-  // Store the CAPTCHA in the session for validation later
-  // console.log("captcha generated------------------->",captcha);
- 
-  req.session.captcha = captcha;
+//       imageUploadFile.mv(uploadPath, function (err) {
+//         if (err) return res.satus(500).send(err);
+//       });
+//     }
 
-  // console.log(req.session);
+//     const newRecipe = new Recipe({
+//       name: req.body.name,
+//       description: req.body.description,
+//       email: req.body.email,
+//       ingredients: req.body.ingredients,
+//       category: req.body.category,
+//       image: newImageName,
+//     });
 
-  
+//     await newRecipe.save();
 
-  res.render('users/login', { captcha });
-};
-
-// User Login
-exports.userLogin = async (req, res) => {
-  try {
-    const { email, password, captchaInput } = req.body;
-    
-    
-    // Validate Captcha
-    // console.log(captchaInput);
-    // console.log(req.session.captcha);
-    
-    
-    if (captchaInput !== req.session.captcha) {
-      req.flash('error', 'Invalid Captcha!');
-      return res.redirect('/login');  // Redirect to login page with error message
-    }
-    
-    
-    // Find User
-    const user = await userModel.findOne({ email });
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      req.flash('error', 'Invalid email or password');
-      return res.redirect('/login');  // Redirect to login page with error message
-    }
-
-    // Clear Captcha
-   req.session.captcha = null;
-
-   console.log(user);
-   req.session.userEmail = user.email
-   
-  //  console.log(user.categoryId);
-  //  console.log(user.recipeId);
-   
-    // console.log(user.role);
-    
-    
-    // Generate JWT
-    const token = jwt.sign({ userId: user._id }, "AmishaAmisha", { expiresIn: '1h' });
-    console.log(token);
-    
-    req.session.token = token
-    req.session.userRole = user.role;
-    console.log(req.session);
-    
-    // res.json({ token });
-    if(user.role === "admin"){
-      return res.redirect('/admin');
-    }
-    res.redirect(`/?name=${user.name}`)
-        
-  } catch (error) {
-    console.error("Error during login:", error);
-    req.flash('error', 'An error occurred during login');
-    res.redirect('/login');  // Redirect to login page with error message
-  }
-};
-
-// OTP Generation
-exports.generateOtp = async (req, res) => {
-  const { phoneNumber } = req.body;
-  // console.log(phoneNumber);
-  
-  try {
-    // Check if the user exists
-    const user = await userModel.findOne({ phoneNumber });
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-      // res.render('otp_verify');
-    }
-
-    // Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000);
-
-    // code given by twilio
-    // client.verify.v2.services("VA2c0ea26dda32eb184f4be3de31cc70b7")
-    //   .verificationChecks
-    //   .create({to: '+918181000731', code: '[Code]'})
-    //   .then(verification_check => console.log(verification_check.status));
-
-    console.log(otp);
-    // code given by twilio
-    // client.verify.v2.services("VA2c0ea26dda32eb184f4be3de31cc70b7")
-    //   .verifications
-    //   .create({to: '+91'+phoneNumber, channel: 'sms'})
-    //   .then(verification => console.log(verification.status));
-
-
-    // Send OTP via Twilio SMS
-    client.messages.create({
-      body: `Amisha jaldi se otp bhej
-        ${otp}`,
-        to: '+91'+phoneNumber,
-        from:'+19166940794',
-    });
-
-    // Store OTP in session
-    req.session.otp = otp
-    
-    req.session.phoneNumber = phoneNumber
-    
-    // res.status(200).json({ message: 'OTP sent to your phone number.' });
-    res.render('users/otp_verify');
-  } catch (error) {
-    res.status(500).json({ message: 'Something went wrong' });
-    // res.render('otp_verify');
-  }
-}
-// verify otp
-exports.verifyOtp = async (req, res) => {
-  const {  otp, newPassword } = req.body;
-
-  const phoneNumber = req.session.phoneNumber
-  try {
-    const user = await userModel.findOne({ phoneNumber });
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    // Check if the OTP matches
-    if (req.session.otp != req.body.otp) {
-      return res.status(400).json({ message: 'Invalid OTP' });
-    }
-
-    // Set new password
-    const newHashPassword = await bcrypt.hash(newPassword, 12)
-    user.password = newHashPassword;
-    await user.save();
-    // Delete OTP and phoneNo from session
-    req.session.phoneNumber = null;
-    req.session.otp = null;
-    // res.status(200).json({ message: 'Password reset successful' });
-    res.redirect('/login');
-  } catch (error) {
-    res.status(500).json({ message: 'Something went wrong' });
-  }
-}
-
-
-
-exports.userSignup = async (req, res) => {
-  try {
-    const { name, email,phoneNumber, gender, age, password } = req.body;
-    // console.log(name, email, gender, age, password );
-    const hashPassword = await bcrypt.hash(password, 12);
-    // console.log(hashPassword);
-    const user = new userModel({
-      name,
-      email,
-      phoneNumber,
-      gender,
-      age,
-      password: hashPassword,
-    });
-    // console.log(user);
-
-    await user.save();
-
-    res.redirect("/login");
-  } catch (error) {
-    res.status(400).json({
-      msg: "error on signup the user",
-      error: error,
-    });
-  }
-};
-
-exports.contactUs = async (req, res) => {
-  res.redirect("/");
-};
-
-exports.useLogout = async (req, res) => {
-  req.session.destroy();
-  console.log("logout successfully");
-  
-  res.redirect("/about");
-
-  };
+//     req.flash("infoSubmit", "Recipe has been added.");
+//     res.redirect("/submit-recipe");
+//   } catch (error) {
+//     // res.json(error);
+//     req.flash("infoErrors", error);
+//     res.redirect("/submit-recipe");
+//   }
+// };
 

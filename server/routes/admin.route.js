@@ -48,7 +48,7 @@ router.post('/recipes', authenticateToken , adminController.createRecipe);
 router.put('/recipes/:id', authenticateToken , adminController.updateRecipe);
 router.delete('/recipes/:id', authenticateToken , adminController.deleteRecipe);
 
-//////
+//
 router.get('/recipes', authenticateToken , adminController.getAllRecipes);
 router.get('/recipes/new', authenticateToken , adminController.showCreateRecipeForm);
 router.post('/recipes', authenticateToken , adminController.createRecipe);
